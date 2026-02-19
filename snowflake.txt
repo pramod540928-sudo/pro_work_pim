@@ -1,0 +1,141 @@
+🎯 What We’re Trying to Achieve
+
+We want applications running in us-west-2 (EKS) to be able to connect to Snowflake in us-east-1 using PrivateLink, without:
+
+Failing over the entire EKS cluster
+
+Using public internet routing
+
+Making major infrastructure changes
+
+Breaking existing apps
+
+Why?
+
+Last year, Snowflake had an issue in one region while AWS was still healthy.
+So the goal is:
+
+Allow apps in us-west-2 to connect to Snowflake in us-east-1 privately — just by changing DNS / connection string — without moving infrastructure.
+
+This is a cross-region failover test (non-prod first).
+
+Later, it will become a production-grade DR pattern.
+
+🏗 What We Need to Create
+
+Even though Snowflake is in us-east-1, all the resources you create are in us-west-2 (where the apps live).
+
+1️⃣ Interface VPC Endpoint (PrivateLink)
+
+📍 Region: us-west-2
+📍 VPC: Internal VPC (EKS VPC)
+
+Create:
+
+aws_vpc_endpoint
+  type           = "Interface"
+  service_name   = "<Snowflake provided service name>"
+  service_region = "us-east-1"
+
+Important settings:
+
+Private subnets (multi-AZ)
+
+Attach Security Group
+
+Private DNS disabled (since we use custom CNAME)
+
+This endpoint will:
+
+Create ENIs in your VPC
+
+Provide private DNS name
+
+Privately route traffic to Snowflake in us-east-1
+
+2️⃣ Security Group for the Endpoint
+
+Attach SG to the VPCE.
+
+Allow:
+
+Inbound TCP 443 from:
+
+EKS worker nodes SG
+
+Or pod CIDR range
+
+Outbound:
+
+Allow 443 (usually default allow all)
+
+3️⃣ Route53 CNAME Record
+
+In your existing private hosted zone, create:
+
+snowflake-failover.internal.company.com
+     → vpce-xxxx.amazonaws.com
+
+
+TTL: 60 seconds (as discussed)
+
+The 13 apps will:
+
+Update their connection string
+
+Use this new hostname for testing
+
+🔁 Flow After Setup
+EKS Pod (us-west-2)
+    ↓
+Route53 private zone
+    ↓
+Interface Endpoint (us-west-2)
+    ↓
+AWS backbone
+    ↓
+Snowflake PrivateLink Service (us-east-1)
+
+
+Fully private. No internet.
+
+🧪 What This Non-Prod Test Proves
+
+Cross-region PrivateLink works
+
+Apps tolerate 60–100ms latency
+
+DNS swap model works
+
+No EKS failover needed
+
+Snowflake DR can happen independently
+
+🚀 Production Goal (Future State)
+
+Later, instead of separate hostname:
+
+You’ll likely:
+
+Use one common Snowflake hostname
+
+Route53 failover / weighted routing
+
+Automatic cutover between west and east endpoints
+
+Proper Terraform module instead of copy-paste
+
+🧾 Final Summary (Short Version)
+🎯 Objective
+
+Enable private cross-region connectivity from EKS us-west-2 → Snowflake us-east-1 for DR testing.
+
+🏗 Resources to Create
+
+Interface VPC Endpoint (us-west-2, service_region=us-east-1)
+
+Security Group attached to endpoint
+
+Route53 CNAME pointing to endpoint DNS
+
+That’s it.
